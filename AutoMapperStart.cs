@@ -1,9 +1,11 @@
-﻿using AutoMapper;
+using AutoMapper;
+using AutoMapTest.Model;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 
-
+namespace AutoMapTest.Map
+{
     public static class AutoMapperStart
     {
         private static DateTime ConvertToDateTime(this string s)
@@ -32,6 +34,18 @@ using System.Linq;
             cfg.CreateMap<string, DateTime>().ConvertUsing(ConvertToDateTime);
             cfg.CreateMap<string, DateTime?>().ConvertUsing(ConvertToDateTimeNullable);
         }
+
+        public static MapperConfiguration CreateMapNew(Action<IMapperConfigurationExpression> action)
+        {
+            return new MapperConfiguration(cfg => {
+                cfg.CreateMap<DateTime, string>().ConvertUsing(d => d.ToString("yyyy-MM-dd HH:mm:ss"));
+                cfg.CreateMap<string, DateTime>().ConvertUsing(ConvertToDateTime);
+                cfg.CreateMap<string, DateTime?>().ConvertUsing(ConvertToDateTimeNullable);
+                action.Invoke(cfg);
+            });
+        }
+
+
 
         public static readonly object TypeLock = new object();
         public static T MapTo<T>(this object source) where T : class
@@ -87,15 +101,12 @@ using System.Linq;
                     typeMapper = Mapper.Instance.ConfigurationProvider.FindTypeMapFor(source, dest);
                     if (typeMapper != null) return;
 
-                    var typeMappers = Mapper.Instance.ConfigurationProvider.GetAllTypeMaps();
-                    Mapper.Reset();
-                    Mapper.Initialize(cfg =>
-                    {
-                        typeMappers.ToList().ForEach(t => cfg.CreateMap(t.SourceType, t.DestinationType));
-                        cfg.CreateMap(source, dest);
-                    });
+                    var mapper = CreateMapNew(cfg => cfg.CreateMap(source, dest)).CreateMapper();
+                    var typeMappers = mapper.ConfigurationProvider.GetAllTypeMaps();
+                    typeMappers.ToList().ForEach(t => Mapper.Configuration.RegisterTypeMap(t));
+                    typeMappers = Mapper.Configuration.GetAllTypeMaps();
                 }
             }
         }
     }
-
+}
