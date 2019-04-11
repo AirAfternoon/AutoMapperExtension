@@ -1,73 +1,37 @@
 using AutoMapper;
-using AutoMapTest.Model;
+using AutoMapper.Configuration;
+using EZR.CPOS.Common.CommonMapper;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
+using System.Text;
 
-namespace AutoMapTest.Map
+namespace EZR.CPOS.Common.Extensions
 {
-    public static class AutoMapperStart
+    public static class ObjectExt
     {
-        private static DateTime ConvertToDateTime(this string s)
-        {
-            if (DateTime.TryParse(s, out DateTime time)) return time;
-            else
-            {
-                if (string.IsNullOrWhiteSpace(s)) return time;
-                else throw new Exception("自动转化不识别的时间格式:" + s);
-            }
-        }
-
-        private static DateTime? ConvertToDateTimeNullable(this string s)
-        {
-            if (DateTime.TryParse(s, out DateTime time)) return time;
-            else
-            {
-                if (string.IsNullOrWhiteSpace(s)) return null;
-                else throw new Exception("自动转化不识别的时间格式:" + s);
-            }
-        }
-
-        public static void CreateMap(IMapperConfigurationExpression cfg)
-        {
-            cfg.CreateMap<DateTime, string>().ConvertUsing(d => d.ToString("yyyy-MM-dd HH:mm:ss"));
-            cfg.CreateMap<string, DateTime>().ConvertUsing(ConvertToDateTime);
-            cfg.CreateMap<string, DateTime?>().ConvertUsing(ConvertToDateTimeNullable);
-        }
-
-        public static MapperConfiguration CreateMapNew(Action<IMapperConfigurationExpression> action)
-        {
-            return new MapperConfiguration(cfg => {
-                cfg.CreateMap<DateTime, string>().ConvertUsing(d => d.ToString("yyyy-MM-dd HH:mm:ss"));
-                cfg.CreateMap<string, DateTime>().ConvertUsing(ConvertToDateTime);
-                cfg.CreateMap<string, DateTime?>().ConvertUsing(ConvertToDateTimeNullable);
-                action.Invoke(cfg);
-            });
-        }
-
-
-
+        public static IMapper _mapper = null;
         public static readonly object TypeLock = new object();
         public static T MapTo<T>(this object source) where T : class
         {
-            //if (source == null) throw new ArgumentNullException($"自动转换失败，类型{source.GetType().Name},{typeof(T).Name}");
             CreateMapper(source.GetType(), typeof(T));
-            return Mapper.Map<T>(source);
+            return _mapper.Map<T>(source);
         }
 
         public static T MapTo<T>(this object source, object dest) where T : class
         {
             CreateMapper(source.GetType(), typeof(T));
-            return (T)Mapper.Map(source, dest, source.GetType(), typeof(T));
+            return (T)_mapper.Map(source, dest, source.GetType(), typeof(T));
         }
         public static List<T> MapToList<T>(this IEnumerable<object> source) where T : class
         {
             if (source == null) return null;
-            //if (!source.Any()) return new List<T>();
-            //if (source == null) throw new ArgumentNullException($"自动转换失败，类型{source.GetType().Name},{typeof(T).Name}");
+            if (!source.Any()) return new List<T>();
             var sourceType = source.GetType().GetGenericArguments().First();
             CreateMapper(sourceType, typeof(T));
-            return Mapper.Map<List<T>>(source);
+            return _mapper.Map<List<T>>(source);
         }
 
         public static List<T> MapToList<T>(this IEnumerable<object> source, object info) where T : class
@@ -79,34 +43,53 @@ namespace AutoMapTest.Map
             CreateMapper(sourceType, info.GetType());
             return source.Select(s =>
             {
-                var d = Mapper.Map<T>(info);
-                return (T)Mapper.Map(source, d, source.GetType(), typeof(T));
+                var d = _mapper.Map<T>(info);
+                return (T)_mapper.Map(source, d, source.GetType(), typeof(T));
             }).ToList();
+        }
+
+        private static void CreateMapper(Type source, Type dest)
+        {
+            var typeMapper = _mapper.ConfigurationProvider.FindTypeMapFor(source, dest);
+            if (typeMapper != null) return;
+            lock (TypeLock)
+            {
+                typeMapper = _mapper.ConfigurationProvider.FindTypeMapFor(source, dest);
+                if (typeMapper != null) return;
+
+                AutoMapperConfig.express.CreateMap(source, dest);
+                _mapper = new MapperConfiguration(AutoMapperConfig.express).CreateMapper();
+            }
+        }
+
+        public static T Map<T>(object obj)
+        {
+            if (obj != null)
+                CreateMapper(obj.GetType(), typeof(T));
+            return _mapper.Map<T>(obj);
+        }
+
+        public static List<T> MapList<T>(IEnumerable<object> list)
+        {
+            CreateMapper(list.GetType().GetGenericArguments().First(), typeof(T));
+            return _mapper.Map<List<T>>(list);
         }
 
         public static T Map<T>(params object[] sources) where T : class, new()
         {
             var dest = new T();
-            sources.ToList().ForEach(s => dest = s.MapTo<T>(dest));
+            sources.ToList().ForEach(s =>
+            {
+                if (s != null)
+                    dest = s.MapTo<T>(dest);
+            });
             return dest;
         }
 
-        private static void CreateMapper(Type source, Type dest)
+        public static TDest Map<TSource, TDest>(object obj)
         {
-            var typeMapper = Mapper.Instance.ConfigurationProvider.FindTypeMapFor(source, dest);
-            if (typeMapper == null)
-            {
-                lock (TypeLock)
-                {
-                    typeMapper = Mapper.Instance.ConfigurationProvider.FindTypeMapFor(source, dest);
-                    if (typeMapper != null) return;
-
-                    var mapper = CreateMapNew(cfg => cfg.CreateMap(source, dest)).CreateMapper();
-                    var typeMappers = mapper.ConfigurationProvider.GetAllTypeMaps();
-                    typeMappers.ToList().ForEach(t => Mapper.Configuration.RegisterTypeMap(t));
-                    typeMappers = Mapper.Configuration.GetAllTypeMaps();
-                }
-            }
+            CreateMapper(typeof(TSource), typeof(TDest));
+            return _mapper.Map<TDest>(obj);
         }
     }
 }
